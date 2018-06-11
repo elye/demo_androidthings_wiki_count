@@ -45,13 +45,14 @@ class MainActivity : Activity() {
     }
 
     private var disposable: Disposable? = null
-    private var segmentDisplay: AlphanumericDisplay? = null
-    private var ledStrip: Apa102? = null
-    private var progressJob: Job? = null
 
-    private var colorRed = 255
-    private var colorBlue = 255
-    private var colorGreen = 255
+    private val peripheralSegmentDispaly : PeripheralSegmentDisplay by lazy {
+        PeripheralSegmentDisplay()
+    }
+
+    private val peripheralLedStrip : PeripheralLedStrip by lazy {
+        PeripheralLedStrip()
+    }
 
     private val wikiApiServe by lazy {
         WikiApiService.create()
@@ -67,99 +68,29 @@ class MainActivity : Activity() {
             }
         }
 
-        initSegmentDisplay()
-        initLedStrip()
-    }
-
-    private fun initSegmentDisplay() {
-        try {
-            segmentDisplay = RainbowHat.openDisplay()
-            segmentDisplay?.let {
-                it.setEnabled(true)
-                it.display("GOOD")
-            } ?: throw IllegalStateException("Error initializing display")
-        } catch (e: IOException) {
-            throw RuntimeException("Error initializing display", e)
-        }
-    }
-
-    private fun initLedStrip() {
-        try {
-            ledStrip = RainbowHat.openLedStrip()
-            ledStrip?.let {
-                it.brightness = 1
-                val colors = IntArray(7)
-                it.write(colors)
-                Log.d(TAG, "Initialized SPI LED strip")
-            } ?: throw IllegalStateException("Error initializing LED strip")
-        } catch (e: IOException) {
-            throw RuntimeException("Error initializing LED strip", e)
-        }
     }
 
     private fun beginSearch(searchString: String) {
-
-        progressJob = launch { startProgress() }
-
+        peripheralLedStrip.showProgress()
         disposable = wikiApiServe.hitCountCheck("query", "json", "search", searchString)
                 .subscribeOn(Schedulers.io())
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe(
                         { result ->
                             updateResult(result)
-                            endProgress()
+                            peripheralLedStrip.endProgress()
                         },
                         { error ->
                             Toast.makeText(this, error.message, Toast.LENGTH_SHORT).show()
-                            endProgress()
+                            peripheralLedStrip.endProgress()
                         }
                 )
     }
 
-    private fun endProgress() {
-        progressJob?.cancel()
-        val colors = IntArray(7)
-        ledStrip?.write(colors)
-
-    }
-
-    private suspend fun startProgress() {
-        val colors = IntArray(7)
-        while (true) {
-            (6 downTo 0).forEach { colorized(colors, it) }
-            (0..6).forEach { colorized(colors, it) }
-        }
-    }
-
-    private suspend fun colorized(colors: IntArray, index: Int) {
-        delay(100)
-        Arrays.fill(colors, 0)
-
-        colorRed = (0..7).random() * 32
-        colorGreen = (0..7).random() * 32
-        colorBlue = (0..7).random() * 32
-
-        colors[index] = Color.rgb(colorRed, colorGreen, colorBlue)
-        ledStrip?.write(colors)
-    }
 
     private fun updateResult(result: Model.Result) {
-        val value = result.query.searchinfo.totalhits
-        txt_search_result.text = "$value result found"
-
-        val valueLength = value.toString().length
-
-        when {
-            valueLength <= 4 -> segmentDisplay?.display(value)
-            valueLength <= 6 -> unitize(value, 1000.0, "k")
-            valueLength <= 9 -> unitize(value, 1000000.0, "M")
-            else -> segmentDisplay?.display("HUGE")
-        }
-    }
-
-    private fun unitize(value: Int, demonimator: Double, unit: String) {
-        val shrinkValue = Math.round(value / demonimator).toInt()
-        segmentDisplay?.display("${shrinkValue}${unit}")
+        txt_search_result.text = "${result.query.searchinfo.totalhits} result found"
+        peripheralSegmentDispaly.updateResult(result)
     }
 
     override fun onPause() {
@@ -169,41 +100,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        closeSegmentDisplay()
-        closeLedStrip()
-
-        progressJob?.cancel()
+        peripheralSegmentDispaly.closeSegmentDisplay()
+        peripheralLedStrip.closeLedStrip()
     }
-
-    private fun closeSegmentDisplay() {
-        try {
-            segmentDisplay?.run {
-                clear()
-                setEnabled(false)
-                close()
-            }
-        } catch (e: IOException) {
-            Log.e(TAG, "Error closing display", e)
-        } finally {
-            segmentDisplay = null
-        }
-    }
-
-    private fun closeLedStrip() {
-        try {
-            ledStrip?.run {
-                brightness = 0
-                write(IntArray(7))
-                close()
-            }
-        } catch (e: IOException) {
-            Log.e(TAG, "Error closing LED strip", e)
-        } finally {
-            ledStrip = null
-        }
-    }
-
-
-    fun ClosedRange<Int>.random() = Random().nextInt(endInclusive - start) +  start
-
 }
